@@ -83,8 +83,9 @@ A 500 MB VeraCrypt container where 8 MB changed → **98.4% bandwidth savings** 
 ## Clients
 
 - **[CrispCloud](https://github.com/CrispStrobe/CrispCloud)** — full-featured cross-platform file manager with built-in delta sync support for Nextcloud, pCloud, and S3
+- **[Nextcloud desktop client](https://github.com/CrispStrobe/nextcloud-desktop/releases/tag/delta-sync-latest)** — fork with delta sync, settings UI, activity display, notifications. Pre-built binaries for Linux, Windows, macOS.
+- **[ownCloud desktop client](https://github.com/CrispStrobe/owncloud-client/releases/tag/delta-sync-latest)** — fork with delta sync, settings UI, activity display. Pre-built binaries for Linux, Windows, macOS.
 - **This repo's CLI demo** — minimal reference implementation
-- **Nextcloud desktop client** — fork with delta sync patches (coming soon)
 
 ## Algorithm
 
