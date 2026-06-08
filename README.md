@@ -1,0 +1,119 @@
+# CrispCloud Delta Sync
+
+**Block-level delta sync for Nextcloud and ownCloud.** Upload only the blocks that changed instead of re-uploading entire files.
+
+Ideal for large files that change incrementally: VeraCrypt/LUKS containers, database files, disk images, VM snapshots, PST archives, virtual hard drives.
+
+## What's in this repo
+
+```
+server/     Nextcloud/ownCloud PHP app — installs via occ, serves block map API
+client/     Dart CLI demo client — exercises all 4 API endpoints
+```
+
+## Quick start
+
+### 1. Install the server app
+
+```bash
+# Copy to your Nextcloud apps directory
+cp -r server/ /path/to/nextcloud/apps/crispcloud_delta
+
+# Enable
+cd /path/to/nextcloud
+sudo -u www-data php occ app:enable crispcloud_delta
+
+# Verify
+curl -u admin:password http://localhost/index.php/apps/crispcloud_delta/api/status
+```
+
+### 2. Try the CLI demo
+
+```bash
+cd client/
+dart pub get
+
+# Check server status
+dart run bin/delta_sync_cli.dart status \
+  -u http://localhost:8888 --user admin --pass secret
+
+# Compute local block map
+dart run bin/delta_sync_cli.dart compute -f /path/to/large-file.bin
+
+# Fetch remote block map
+dart run bin/delta_sync_cli.dart blockmap \
+  -u http://localhost:8888 --user admin --pass secret \
+  --path Documents/large-file.bin
+
+# Delta sync — uploads only changed blocks
+dart run bin/delta_sync_cli.dart sync \
+  -u http://localhost:8888 --user admin --pass secret \
+  -f /local/large-file.bin --path Documents/large-file.bin
+```
+
+## How it works
+
+1. Files are split into fixed 4 MB blocks
+2. Each block gets two hashes: **Adler-32** (fast weak hash) + **SHA-256** (collision-resistant strong hash)
+3. Client compares its local block map against the server's cached block map
+4. Only blocks where hashes differ are uploaded via the REST API
+5. After all block writes, a finalize call updates the file's mtime and refreshes the cached block map
+
+A 500 MB VeraCrypt container where 8 MB changed → **98.4% bandwidth savings** (only 2 blocks uploaded instead of 125).
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/status` | Health check (public) |
+| `GET` | `/api/blockmap/{path}` | Get block map (auto-computed, cached by ETag) |
+| `POST` | `/api/blocks/{path}?offset=N&size=M` | Write a single block at offset |
+| `POST` | `/api/finalize/{path}` | Finalize after block writes |
+
+## Compatibility
+
+| Platform | Supported |
+|----------|-----------|
+| Nextcloud 25+ | Yes |
+| ownCloud 10.11+ | Yes |
+| ownCloud Infinite Scale (oCIS) | No (Go-based, no PHP apps) |
+
+**Requirements:** PHP 8.0+. Uses only stable OCP APIs shared by both platforms.
+
+## Clients
+
+- **[CrispCloud](https://github.com/CrispStrobe/CrispCloud)** — full-featured cross-platform file manager with built-in delta sync support for Nextcloud, pCloud, and S3
+- **This repo's CLI demo** — minimal reference implementation
+- **Nextcloud desktop client** — fork with delta sync patches (coming soon)
+
+## Algorithm
+
+The block map format is compatible with rsync-style delta transfer:
+
+```json
+{
+  "filePath": "/Documents/vault.vc",
+  "totalSize": 524288000,
+  "blockSize": 4194304,
+  "blockCount": 125,
+  "signatures": [
+    {
+      "blockIndex": 0,
+      "offset": 0,
+      "size": 4194304,
+      "weakHash": 1234567890,
+      "strongHash": "a1b2c3d4e5f6..."
+    }
+  ],
+  "createdAt": "2026-06-08T12:00:00+00:00",
+  "etag": "abc123def456"
+}
+```
+
+- **Adler-32** (RFC 1950) — fast O(n) checksum with O(1) rolling update capability
+- **SHA-256** — collision-resistant confirmation, only computed when weak hashes match
+- **4 MB blocks** — balances granularity vs overhead; configurable in future versions
+
+## License
+
+AGPL-3.0 — same as Nextcloud and CrispCloud.
