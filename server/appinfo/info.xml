@@ -18,15 +18,15 @@ files, disk images, VM snapshots, PST archives.
 ## API Endpoints
 
 - `GET  /api/blockmap/{path}` — retrieve the block map for a file
-- `PUT  /api/blocks/{path}?offset=N&size=M` — write a single block at offset
-- `POST /api/finalize/{path}` — finalize after block writes (update mtime/etag)
+- `POST /api/blocks/{path}?offset=N&size=M` — write a single block at offset
+- `POST /api/finalize/{path}?size=N` — finalize after block writes (truncates to N bytes if smaller)
 - `GET  /api/status` — check if the app is installed and working
 
 ## Compatibility
 
-- Nextcloud 25–31
+- Nextcloud 25–33
 - ownCloud 10.11+ (uses shared OCP\Files and OCP\AppFramework APIs)
-- ownCloud Infinite Scale (oCIS): not supported (use Graph/delta API instead)
+- ownCloud Infinite Scale (oCIS): use the Go sidecar in ocis/ instead
     ]]></description>
     <version>0.1.0</version>
     <licence>agpl</licence>

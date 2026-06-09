@@ -7,8 +7,9 @@ Ideal for large files that change incrementally: VeraCrypt/LUKS containers, data
 ## What's in this repo
 
 ```
-server/     Nextcloud/ownCloud PHP app — installs via occ, serves block map API
-client/     Dart CLI demo client — exercises all 4 API endpoints
+server/     PHP app — Nextcloud 25–33 and ownCloud 10.11+
+ocis/       Go sidecar — ownCloud Infinite Scale (oCIS v5+)
+client/     Dart CLI demo — exercises all 4 API endpoints
 ```
 
 ## Quick start
@@ -90,7 +91,7 @@ The suite covers: status endpoint, block map accuracy, bit-perfect delta update,
 |----------|-----------|
 | Nextcloud 25–33 | Yes (tested on NC 33 / PHP 8.3) |
 | ownCloud 10.11+ | Yes (tested on OC 10.15 / PHP 7.4) |
-| ownCloud Infinite Scale (oCIS) | No (Go-based, no PHP apps) |
+| ownCloud Infinite Scale (oCIS) | Yes (Go sidecar — see [`ocis/`](ocis/)) |
 
 **Requirements:** PHP 7.4+. Uses only stable OCP APIs shared by both platforms.
 
