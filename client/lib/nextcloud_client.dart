@@ -83,10 +83,12 @@ class NextcloudDeltaSyncClient {
   }
 
   /// Finalize after block writes — triggers mtime update and block map refresh.
-  Future<void> finalize(String remotePath) async {
+  /// Pass [size] to truncate the file if it shrank.
+  Future<void> finalize(String remotePath, {int? size}) async {
     final encoded = Uri.encodeComponent(remotePath);
+    final sizeParam = size != null ? '?size=$size' : '';
     final resp = await http.post(
-      Uri.parse('$_appBase/api/finalize/$encoded'),
+      Uri.parse('$_appBase/api/finalize/$encoded$sizeParam'),
       headers: _authHeaders,
     );
     if (resp.statusCode != 200) {
@@ -146,7 +148,8 @@ class NextcloudDeltaSyncClient {
     }
 
     log?.call('Finalizing...');
-    await finalize(remotePath);
+    final localSize = await File(localPath).length();
+    await finalize(remotePath, size: localSize);
     log?.call('Done.');
 
     return delta;
