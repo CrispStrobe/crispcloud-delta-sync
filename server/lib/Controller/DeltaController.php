@@ -9,20 +9,26 @@ use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
+use OCP\IUserSession;
 
 class DeltaController extends Controller {
     private BlockMapService $blockMapService;
-    private string $userId;
+    private IUserSession $userSession;
 
     public function __construct(
         string $appName,
         IRequest $request,
         BlockMapService $blockMapService,
-        string $userId
+        IUserSession $userSession
     ) {
         parent::__construct($appName, $request);
         $this->blockMapService = $blockMapService;
-        $this->userId = $userId;
+        $this->userSession = $userSession;
+    }
+
+    private function getUserId(): ?string {
+        $user = $this->userSession->getUser();
+        return $user ? $user->getUID() : null;
     }
 
     /**
@@ -30,12 +36,14 @@ class DeltaController extends Controller {
      * @NoCSRFRequired
      *
      * GET /api/blockmap/{path}
-     *
-     * Returns the block map (Adler-32 + SHA-256 per 4 MB block) for a file.
-     * Cached server-side; recomputed when ETag changes.
      */
     public function getBlockMap(string $path): JSONResponse {
-        $blockMap = $this->blockMapService->getBlockMap($this->userId, '/' . $path);
+        $userId = $this->getUserId();
+        if ($userId === null) {
+            return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+
+        $blockMap = $this->blockMapService->getBlockMap($userId, '/' . $path);
 
         if ($blockMap === null) {
             return new JSONResponse(
@@ -51,23 +59,20 @@ class DeltaController extends Controller {
      * @NoAdminRequired
      * @NoCSRFRequired
      *
-     * PUT /api/blocks/{path}?offset=N&size=M
-     *
-     * Write a single block at the given offset. The request body is the raw
-     * block data. Used by CrispCloud's DeltaSyncService to upload only the
-     * changed blocks of a large file.
+     * POST /api/blocks/{path}?offset=N&size=M
      */
     public function putBlock(string $path): JSONResponse {
+        $userId = $this->getUserId();
+        if ($userId === null) {
+            return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+
         $offset = (int)$this->request->getParam('offset', '0');
         $size = (int)$this->request->getParam('size', '0');
 
-        // Read raw body
         $data = file_get_contents('php://input');
         if ($data === false || strlen($data) === 0) {
-            return new JSONResponse(
-                ['error' => 'Empty request body'],
-                Http::STATUS_BAD_REQUEST
-            );
+            return new JSONResponse(['error' => 'Empty request body'], Http::STATUS_BAD_REQUEST);
         }
 
         if ($size > 0 && strlen($data) !== $size) {
@@ -78,12 +83,9 @@ class DeltaController extends Controller {
         }
 
         try {
-            $this->blockMapService->writeBlock($this->userId, '/' . $path, $offset, $data);
+            $this->blockMapService->writeBlock($userId, '/' . $path, $offset, $data);
         } catch (\Throwable $e) {
-            return new JSONResponse(
-                ['error' => $e->getMessage()],
-                Http::STATUS_INTERNAL_SERVER_ERROR
-            );
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
 
         return new JSONResponse(['status' => 'ok', 'offset' => $offset, 'size' => strlen($data)]);
@@ -93,22 +95,21 @@ class DeltaController extends Controller {
      * @NoAdminRequired
      * @NoCSRFRequired
      *
-     * POST /api/finalize/{path}
-     *
-     * Called after all block writes are complete. Updates the file's mtime,
-     * recomputes the block map, and refreshes the ETag.
+     * POST /api/finalize/{path}?size=N
      */
     public function finalize(string $path): JSONResponse {
+        $userId = $this->getUserId();
+        if ($userId === null) {
+            return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+
         $sizeParam = $this->request->getParam('size');
         $newSize = ($sizeParam !== null) ? (int)$sizeParam : -1;
 
         try {
-            $this->blockMapService->finalizeFile($this->userId, '/' . $path, $newSize);
+            $this->blockMapService->finalizeFile($userId, '/' . $path, $newSize);
         } catch (\Throwable $e) {
-            return new JSONResponse(
-                ['error' => $e->getMessage()],
-                Http::STATUS_INTERNAL_SERVER_ERROR
-            );
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
 
         return new JSONResponse(['status' => 'finalized']);
@@ -120,8 +121,6 @@ class DeltaController extends Controller {
      * @PublicPage
      *
      * GET /api/status
-     *
-     * Health check — confirms the app is installed and the API is reachable.
      */
     public function status(): JSONResponse {
         return new JSONResponse([

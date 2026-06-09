@@ -6,21 +6,14 @@ namespace OCA\CrispCloudDelta\AppInfo;
 
 use OCA\CrispCloudDelta\Capabilities;
 use OCP\AppFramework\App;
-use OCP\AppFramework\Bootstrap\IBootContext;
-use OCP\AppFramework\Bootstrap\IBootstrap;
-use OCP\AppFramework\Bootstrap\IRegistrationContext;
 
-class Application extends App implements IBootstrap {
+// IBootstrap was introduced in Nextcloud 20 and does not exist in ownCloud 10.
+// Using the old-style container registration keeps the app compatible with both.
+class Application extends App {
     public const APP_ID = 'crispcloud_delta';
 
     public function __construct() {
         parent::__construct(self::APP_ID);
-    }
-
-    public function register(IRegistrationContext $context): void {
-        $context->registerCapability(Capabilities::class);
-    }
-
-    public function boot(IBootContext $context): void {
+        $this->getContainer()->registerCapability(Capabilities::class);
     }
 }

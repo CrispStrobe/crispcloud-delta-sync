@@ -7,7 +7,7 @@ namespace OCA\CrispCloudDelta\Service;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\IConfig;
-use Psr\Log\LoggerInterface;
+use OCP\ILogger;
 
 /**
  * Computes, caches, and serves block-level file indexes.
@@ -33,12 +33,12 @@ class BlockMapService {
 
     private IRootFolder $rootFolder;
     private IConfig $config;
-    private LoggerInterface $logger;
+    private ILogger $logger;
 
     public function __construct(
         IRootFolder $rootFolder,
         IConfig $config,
-        LoggerInterface $logger
+        ILogger $logger
     ) {
         $this->rootFolder = $rootFolder;
         $this->config = $config;
