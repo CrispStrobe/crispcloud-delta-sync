@@ -73,17 +73,25 @@ A 500 MB VeraCrypt container where 8 MB changed → **98.4% bandwidth savings** 
 
 ## Testing
 
-A live integration test suite is included:
+Live integration test suites are included for all three platforms:
 
 ```bash
-# Run against Nextcloud
+# Nextcloud
 python server/test_live.py http://your-server:8888 admin password
 
-# Run against ownCloud
+# ownCloud 10
 python server/test_live.py http://your-server:8889 admin password
+
+# oCIS (Go sidecar + oCIS running — see ocis/README.md for setup)
+python server/test_ocis_live.py \
+    http://your-server:8091 \
+    https://your-server:9200 \
+    admin password
 ```
 
-The suite covers: status endpoint, block map accuracy, bit-perfect delta update, file shrink (truncation), and file grow. All 8 assertions pass on both Nextcloud 33 and ownCloud 10.
+Each suite covers 5 scenarios: status endpoint, block map accuracy, bit-perfect
+delta update, file shrink (truncation), and file grow. All 8 assertions pass on
+Nextcloud 33, ownCloud 10, and oCIS v8.0.4.
 
 ## Compatibility
 
@@ -91,7 +99,7 @@ The suite covers: status endpoint, block map accuracy, bit-perfect delta update,
 |----------|-----------|
 | Nextcloud 25–33 | Yes (tested on NC 33 / PHP 8.3) |
 | ownCloud 10.11+ | Yes (tested on OC 10.15 / PHP 7.4) |
-| ownCloud Infinite Scale (oCIS) | Yes (Go sidecar — see [`ocis/`](ocis/)) |
+| ownCloud Infinite Scale (oCIS) | Yes (Go sidecar — tested on oCIS v8.0.4) |
 
 **Requirements:** PHP 7.4+. Uses only stable OCP APIs shared by both platforms.
 
