@@ -1,8 +1,8 @@
-// Package auth extracts the username from an OIDC Bearer token.
+// Package auth extracts the username from an Authorization header.
 // Token signature verification is deliberately delegated to oCIS WebDAV:
-// every file operation passes the original Bearer token through, so oCIS
-// rejects invalid tokens itself. We only need the username to construct
-// WebDAV paths and temp-file directories.
+// every file operation passes the original header through, so oCIS
+// rejects invalid credentials itself. We only need the username to
+// construct WebDAV paths and temp-file directories.
 package auth
 
 import (
@@ -12,14 +12,32 @@ import (
 	"strings"
 )
 
-// UsernameFromHeader parses an "Authorization: Bearer <jwt>" header and
-// returns the value of the "preferred_username" claim (falling back to "sub").
+// UsernameFromHeader extracts the username from either:
+//   - "Authorization: Bearer <jwt>" — decodes JWT payload, reads preferred_username/sub
+//   - "Authorization: Basic <b64>"  — decodes base64(user:pass), returns user
+//
+// The original header is passed through to oCIS unchanged; oCIS validates it.
 func UsernameFromHeader(authHeader string) (string, error) {
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == authHeader {
-		return "", errors.New("authorization header is not a Bearer token")
+	switch {
+	case strings.HasPrefix(authHeader, "Bearer "):
+		return usernameFromJWT(strings.TrimPrefix(authHeader, "Bearer "))
+	case strings.HasPrefix(authHeader, "Basic "):
+		return usernameFromBasic(strings.TrimPrefix(authHeader, "Basic "))
+	default:
+		return "", errors.New("authorization header must be Bearer or Basic")
 	}
-	return usernameFromJWT(token)
+}
+
+func usernameFromBasic(encoded string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", errors.New("cannot base64-decode Basic auth")
+	}
+	parts := strings.SplitN(string(raw), ":", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return "", errors.New("invalid Basic auth format")
+	}
+	return parts[0], nil
 }
 
 func usernameFromJWT(token string) (string, error) {

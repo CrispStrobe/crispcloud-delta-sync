@@ -5,6 +5,7 @@ package storage
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,10 +20,17 @@ type Client struct {
 }
 
 // New returns a Client for the given oCIS base URL (e.g. "https://cloud.example.com").
-func New(ocisURL string) *Client {
+// Pass insecure=true to skip TLS verification (useful for self-signed certs in dev/test).
+func New(ocisURL string, insecure bool) *Client {
+	transport := http.DefaultTransport
+	if insecure {
+		transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		}
+	}
 	return &Client{
 		ocisURL: strings.TrimRight(ocisURL, "/"),
-		http:    &http.Client{Timeout: 5 * time.Minute},
+		http:    &http.Client{Timeout: 5 * time.Minute, Transport: transport},
 	}
 }
 

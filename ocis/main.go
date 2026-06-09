@@ -6,9 +6,10 @@
 //
 // Configuration (environment variables):
 //
-//	OCIS_URL     Base URL of the oCIS instance  (default: http://localhost:9200)
-//	LISTEN_ADDR  TCP address to listen on       (default: :8090)
-//	TEMP_DIR     Directory for in-flight blocks  (default: /tmp/crispcloud_delta)
+//	OCIS_URL      Base URL of the oCIS instance  (default: http://localhost:9200)
+//	LISTEN_ADDR   TCP address to listen on       (default: :8090)
+//	TEMP_DIR      Directory for in-flight blocks  (default: /tmp/crispcloud_delta)
+//	OCIS_INSECURE Set to "true" to skip TLS cert verification (for self-signed certs)
 package main
 
 import (
@@ -24,8 +25,9 @@ func main() {
 	ocisURL := getenv("OCIS_URL", "http://localhost:9200")
 	listenAddr := getenv("LISTEN_ADDR", ":8090")
 	tempDir := getenv("TEMP_DIR", "/tmp/crispcloud_delta")
+	insecure := os.Getenv("OCIS_INSECURE") == "true"
 
-	store := storage.New(ocisURL)
+	store := storage.New(ocisURL, insecure)
 	h := handler.New(store, tempDir)
 
 	mux := http.NewServeMux()
