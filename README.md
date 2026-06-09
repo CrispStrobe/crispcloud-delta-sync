@@ -68,17 +68,31 @@ A 500 MB VeraCrypt container where 8 MB changed → **98.4% bandwidth savings** 
 | `GET` | `/api/status` | Health check (public) |
 | `GET` | `/api/blockmap/{path}` | Get block map (auto-computed, cached by ETag) |
 | `POST` | `/api/blocks/{path}?offset=N&size=M` | Write a single block at offset |
-| `POST` | `/api/finalize/{path}` | Finalize after block writes |
+| `POST` | `/api/finalize/{path}?size=N` | Finalize after block writes (truncates file to N bytes if N < current size) |
+
+## Testing
+
+A live integration test suite is included:
+
+```bash
+# Run against Nextcloud
+python server/test_live.py http://your-server:8888 admin password
+
+# Run against ownCloud
+python server/test_live.py http://your-server:8889 admin password
+```
+
+The suite covers: status endpoint, block map accuracy, bit-perfect delta update, file shrink (truncation), and file grow. All 8 assertions pass on both Nextcloud 33 and ownCloud 10.
 
 ## Compatibility
 
 | Platform | Supported |
 |----------|-----------|
-| Nextcloud 25+ | Yes |
-| ownCloud 10.11+ | Yes |
+| Nextcloud 25–33 | Yes (tested on NC 33 / PHP 8.3) |
+| ownCloud 10.11+ | Yes (tested on OC 10.15 / PHP 7.4) |
 | ownCloud Infinite Scale (oCIS) | No (Go-based, no PHP apps) |
 
-**Requirements:** PHP 8.0+. Uses only stable OCP APIs shared by both platforms.
+**Requirements:** PHP 7.4+. Uses only stable OCP APIs shared by both platforms.
 
 ## Clients
 
