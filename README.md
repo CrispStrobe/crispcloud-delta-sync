@@ -101,6 +101,24 @@ The suite covers: status endpoint, block map accuracy, bit-perfect delta update,
 - **[ownCloud desktop client](https://github.com/CrispStrobe/owncloud-client/releases/tag/delta-sync-latest)** — fork with delta sync, settings UI, activity display. Pre-built binaries for Linux, Windows, macOS.
 - **This repo's CLI demo** — minimal reference implementation
 
+## oCIS (ownCloud Infinite Scale)
+
+A Go-based sidecar extension is available in [`ocis/`](ocis/) for ownCloud
+Infinite Scale. It exposes the same four-endpoint API as the PHP app so
+existing desktop clients work against oCIS without modification.
+
+File I/O is proxied through oCIS's own WebDAV endpoint (all storage backends
+supported). Authentication is fully delegated: the client's OIDC Bearer token
+passes through to oCIS on every call.
+
+```
+server/     PHP app — Nextcloud 25–33 and ownCloud 10.11+
+ocis/       Go sidecar — ownCloud Infinite Scale (oCIS v5+)
+client/     Dart CLI demo
+```
+
+See [`ocis/README.md`](ocis/README.md) for deployment instructions.
+
 ## Algorithm
 
 The block map format is compatible with rsync-style delta transfer:
