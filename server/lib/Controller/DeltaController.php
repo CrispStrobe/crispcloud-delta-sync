@@ -99,8 +99,11 @@ class DeltaController extends Controller {
      * recomputes the block map, and refreshes the ETag.
      */
     public function finalize(string $path): JSONResponse {
+        $sizeParam = $this->request->getParam('size');
+        $newSize = ($sizeParam !== null) ? (int)$sizeParam : -1;
+
         try {
-            $this->blockMapService->finalizeFile($this->userId, '/' . $path);
+            $this->blockMapService->finalizeFile($this->userId, '/' . $path, $newSize);
         } catch (\Throwable $e) {
             return new JSONResponse(
                 ['error' => $e->getMessage()],

@@ -193,9 +193,19 @@ class BlockMapService {
     /**
      * Finalize a file after block writes — touch mtime and invalidate cache.
      */
-    public function finalizeFile(string $userId, string $path): void {
+    public function finalizeFile(string $userId, string $path, int $newSize = -1): void {
         $userFolder = $this->rootFolder->getUserFolder($userId);
         $file = $userFolder->get($path);
+
+        // Truncate if the new size is smaller than the current file size.
+        // Without this, a shrinking file would leave stale data at the tail.
+        if ($newSize >= 0 && $newSize < $file->getSize()) {
+            $handle = $file->fopen('cb+');
+            if ($handle !== false) {
+                ftruncate($handle, $newSize);
+                fclose($handle);
+            }
+        }
 
         // Touch triggers Nextcloud to update ETag and mtime
         $file->touch();
