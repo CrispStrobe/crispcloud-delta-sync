@@ -7,7 +7,6 @@ namespace OCA\CrispCloudDelta\Service;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\IConfig;
-use OCP\ILogger;
 
 /**
  * Computes, caches, and serves block-level file indexes.
@@ -33,16 +32,13 @@ class BlockMapService {
 
     private IRootFolder $rootFolder;
     private IConfig $config;
-    private ILogger $logger;
 
     public function __construct(
         IRootFolder $rootFolder,
-        IConfig $config,
-        ILogger $logger
+        IConfig $config
     ) {
         $this->rootFolder = $rootFolder;
         $this->config = $config;
-        $this->logger = $logger;
     }
 
     /**
@@ -74,10 +70,7 @@ class BlockMapService {
         }
 
         // Compute fresh block map
-        $this->logger->info("Computing block map for {path} ({size} bytes)", [
-            'path' => $path,
-            'size' => $fileSize,
-        ]);
+        error_log("crispcloud_delta: computing block map for $path ($fileSize bytes)");
 
         $blockMap = $this->computeBlockMap($file, $path);
         $blockMap['etag'] = $etag;
@@ -183,11 +176,7 @@ class BlockMapService {
             fclose($handle);
         }
 
-        $this->logger->debug("Wrote block at offset {offset} ({size} bytes) to {path}", [
-            'offset' => $offset,
-            'size' => strlen($data),
-            'path' => $path,
-        ]);
+        error_log("crispcloud_delta: wrote block at offset $offset (" . strlen($data) . " bytes) to $path");
     }
 
     /**
@@ -215,7 +204,7 @@ class BlockMapService {
         $blockMap['etag'] = $file->getEtag();
         $this->saveCachedBlockMap($userId, $path, $blockMap);
 
-        $this->logger->info("Finalized delta sync for {path}", ['path' => $path]);
+        error_log("crispcloud_delta: finalized delta sync for $path");
     }
 
     // -------------------------------------------------------------------------
@@ -238,9 +227,7 @@ class BlockMapService {
         } catch (NotFoundException $e) {
             return null;
         } catch (\Throwable $e) {
-            $this->logger->warning("Failed to load cached block map: {error}", [
-                'error' => $e->getMessage(),
-            ]);
+            error_log("crispcloud_delta: failed to load cached block map: " . $e->getMessage());
             return null;
         }
     }
@@ -266,9 +253,7 @@ class BlockMapService {
                 $userFolder->newFile($cachePath, $json);
             }
         } catch (\Throwable $e) {
-            $this->logger->warning("Failed to save cached block map: {error}", [
-                'error' => $e->getMessage(),
-            ]);
+            error_log("crispcloud_delta: failed to save cached block map: " . $e->getMessage());
         }
     }
 }
