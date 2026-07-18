@@ -60,7 +60,15 @@ class NextcloudDeltaSyncClient {
       throw HttpException(
           'getBlockMap failed: ${resp.statusCode} ${resp.body}');
     }
-    return BlockMap.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+    // Untrusted server body: jsonDecode already throws FormatException on
+    // invalid JSON; guard the object shape so a non-object payload surfaces the
+    // same clean error instead of a TypeError from the cast.
+    final decoded = jsonDecode(resp.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException(
+          'getBlockMap: response body is not a JSON object');
+    }
+    return BlockMap.fromJson(decoded);
   }
 
   /// Upload a single block at [offset].

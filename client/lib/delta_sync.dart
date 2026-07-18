@@ -17,6 +17,34 @@ const int kDefaultBlockSize = 4 * 1024 * 1024; // 4 MB
 const int _kAdlerMod = 65521; // Largest prime < 2^16
 
 // ---------------------------------------------------------------------------
+// Validating JSON accessors
+// ---------------------------------------------------------------------------
+//
+// BlockMap.fromJson runs on untrusted input — a server response body
+// (nextcloud_client) or a persisted cache that may be corrupt or hand-edited.
+// A bare `as int` / `as String` cast leaks an opaque TypeError (and a missing
+// field a NoSuchMethodError) instead of a clean, catchable failure. These
+// accessors surface a FormatException with the offending field, and tolerate
+// an integer JSON-encoded as a double (`4.0`), which some encoders emit.
+
+Never _malformed(String what, String field, Object? value) =>
+    throw FormatException('$what: field "$field" is '
+        '${value == null ? 'missing' : 'not the expected type ($value)'}');
+
+int _jsonInt(String what, Map<String, dynamic> j, String field) {
+  final v = j[field];
+  if (v is int) return v;
+  if (v is num && v == v.roundToDouble()) return v.toInt();
+  _malformed(what, field, v);
+}
+
+String _jsonStr(String what, Map<String, dynamic> j, String field) {
+  final v = j[field];
+  if (v is String) return v;
+  _malformed(what, field, v);
+}
+
+// ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
@@ -44,11 +72,11 @@ class BlockSignature {
       };
 
   factory BlockSignature.fromJson(Map<String, dynamic> j) => BlockSignature(
-        blockIndex: j['blockIndex'] as int,
-        offset: j['offset'] as int,
-        size: j['size'] as int,
-        weakHash: j['weakHash'] as int,
-        strongHash: j['strongHash'] as String,
+        blockIndex: _jsonInt('BlockSignature', j, 'blockIndex'),
+        offset: _jsonInt('BlockSignature', j, 'offset'),
+        size: _jsonInt('BlockSignature', j, 'size'),
+        weakHash: _jsonInt('BlockSignature', j, 'weakHash'),
+        strongHash: _jsonStr('BlockSignature', j, 'strongHash'),
       );
 
   @override
@@ -91,17 +119,39 @@ class BlockMap {
         if (etag != null) 'etag': etag,
       };
 
-  factory BlockMap.fromJson(Map<String, dynamic> j) => BlockMap(
-        filePath: j['filePath'] as String,
-        totalSize: j['totalSize'] as int,
-        blockSize: j['blockSize'] as int,
-        blockCount: j['blockCount'] as int,
-        signatures: (j['signatures'] as List<dynamic>)
-            .map((e) => BlockSignature.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        createdAt: DateTime.parse(j['createdAt'] as String),
-        etag: j['etag'] as String?,
-      );
+  factory BlockMap.fromJson(Map<String, dynamic> j) {
+    final rawSigs = j['signatures'];
+    if (rawSigs is! List) _malformed('BlockMap', 'signatures', rawSigs);
+    final signatures = <BlockSignature>[];
+    for (final e in rawSigs) {
+      if (e is! Map<String, dynamic>) _malformed('BlockMap', 'signatures[]', e);
+      signatures.add(BlockSignature.fromJson(e));
+    }
+
+    final createdStr = _jsonStr('BlockMap', j, 'createdAt');
+    final DateTime createdAt;
+    try {
+      createdAt = DateTime.parse(createdStr);
+    } on FormatException {
+      throw FormatException(
+          'BlockMap: field "createdAt" is not a valid date ($createdStr)');
+    }
+
+    final rawEtag = j['etag'];
+    if (rawEtag != null && rawEtag is! String) {
+      _malformed('BlockMap', 'etag', rawEtag);
+    }
+
+    return BlockMap(
+      filePath: _jsonStr('BlockMap', j, 'filePath'),
+      totalSize: _jsonInt('BlockMap', j, 'totalSize'),
+      blockSize: _jsonInt('BlockMap', j, 'blockSize'),
+      blockCount: _jsonInt('BlockMap', j, 'blockCount'),
+      signatures: signatures,
+      createdAt: createdAt,
+      etag: rawEtag as String?,
+    );
+  }
 }
 
 class DeltaResult {
