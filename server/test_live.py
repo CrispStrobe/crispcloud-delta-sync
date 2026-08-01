@@ -8,6 +8,8 @@ Tests:
   3. Delta update (file modification) — upload only changed block, verify bit-perfect result
   4. File shrink — finalize with ?size= param, verify server truncates correctly
   5. File grow — new block added at the end, verify server extends correctly
+  6. Stale ETag — concurrent mutation is rejected without overwriting newer data
+  7. Staged visibility — readers see the old file until finalize commits it
 
 Usage:
   python3 test_live.py http://168.119.190.252:8888 admin Nextcloud2026!
@@ -356,6 +358,44 @@ def test_stale_etag_rejected(base_url, user, password):
         webdav_delete(base_url, user, password, remote_path)
 
 
+def test_staged_reader_visibility(base_url, user, password):
+    print("\n[7] Staged finalize is invisible until commit")
+    remote_path = "_delta_test_staged_visibility.bin"
+    original = bytes([0x31]) * BLOCK_SIZE
+    changed = bytes([0xE2]) * BLOCK_SIZE
+
+    try:
+        code = webdav_put(base_url, user, password, remote_path, original)
+        assert code in (200, 201, 204)
+        code, blockmap = delta_blockmap(base_url, user, password, remote_path)
+        assert code == 200 and blockmap.get("etag"), "missing initial ETag"
+
+        code = delta_put_block(
+            base_url, user, password, remote_path, 0, changed,
+            if_match=blockmap["etag"])
+        assert code == 200, f"staged block write returned {code}"
+
+        # A reader between block staging and finalize must still observe the
+        # committed file. The changed bytes become visible only at finalize.
+        code, visible = webdav_get(base_url, user, password, remote_path)
+        assert code == 200 and visible == original, \
+            "reader observed staged bytes before finalize"
+        ok("reader sees committed bytes while block is staged")
+
+        code = delta_finalize(
+            base_url, user, password, remote_path, len(changed),
+            if_match=blockmap["etag"])
+        assert code == 200, f"finalize returned {code}"
+        code, visible = webdav_get(base_url, user, password, remote_path)
+        assert code == 200 and visible == changed, \
+            "reader did not observe committed bytes after finalize"
+        ok("reader sees all staged bytes after finalize")
+    except Exception as e:
+        fail("staged finalize visibility", str(e))
+    finally:
+        webdav_delete(base_url, user, password, remote_path)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -377,6 +417,7 @@ if __name__ == "__main__":
     test_file_shrink(base_url, user, password)
     test_file_grow(base_url, user, password)
     test_stale_etag_rejected(base_url, user, password)
+    test_staged_reader_visibility(base_url, user, password)
 
     passed = sum(1 for _, ok in results if ok)
     total = len(results)
