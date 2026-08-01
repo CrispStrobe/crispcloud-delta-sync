@@ -154,7 +154,14 @@ class BlockMapService {
     /**
      * Write a block of data at a specific offset in a file.
      */
-    public function writeBlock(string $userId, string $path, int $offset, string $data): void {
+    public function writeBlock(
+        string $userId,
+        string $path,
+        int $offset,
+        string $data,
+        ?string $ifMatch = null
+    ): void {
+        $this->assertEtag($userId, $path, $ifMatch);
         $userFolder = $this->rootFolder->getUserFolder($userId);
         $file = $userFolder->get($path);
 
@@ -182,7 +189,13 @@ class BlockMapService {
     /**
      * Finalize a file after block writes — touch mtime and invalidate cache.
      */
-    public function finalizeFile(string $userId, string $path, int $newSize = -1): void {
+    public function finalizeFile(
+        string $userId,
+        string $path,
+        int $newSize = -1,
+        ?string $ifMatch = null
+    ): void {
+        $this->assertEtag($userId, $path, $ifMatch);
         $userFolder = $this->rootFolder->getUserFolder($userId);
         $file = $userFolder->get($path);
 
@@ -205,6 +218,37 @@ class BlockMapService {
         $this->saveCachedBlockMap($userId, $path, $blockMap);
 
         error_log("crispcloud_delta: finalized delta sync for $path");
+    }
+
+    /**
+     * Enforce an optional HTTP If-Match validator before a mutation.
+     *
+     * The request controller passes the header through this method. The
+     * nullable parameter keeps older clients fully backward compatible while
+     * allowing newer clients to reject a stale block map with HTTP 412.
+     */
+    public function assertEtag(string $userId, string $path, ?string $ifMatch): void {
+        if ($ifMatch === null || trim($ifMatch) === '') {
+            return;
+        }
+
+        $userFolder = $this->rootFolder->getUserFolder($userId);
+        $file = $userFolder->get($path);
+        $actual = $file->getEtag();
+        $expectedValues = array_map('trim', explode(',', $ifMatch));
+
+        foreach ($expectedValues as $expected) {
+            if ($expected === '*') {
+                return;
+            }
+            $expected = preg_replace('/^W\\//i', '', $expected) ?? $expected;
+            $expected = trim($expected, '"');
+            if ($expected === $actual) {
+                return;
+            }
+        }
+
+        throw new EtagMismatchException($path, $ifMatch, $actual);
     }
 
     // -------------------------------------------------------------------------

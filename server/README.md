@@ -8,6 +8,8 @@ Block-level delta sync for large files. Instead of re-uploading an entire 500 MB
 2. **REST API for block maps** — clients compare local vs remote block maps to find diffs
 3. **Partial block writes** — only changed blocks are uploaded, written at their exact file offset
 4. **Auto-recompute on change** — if the file's ETag changes (edited by another client), the block map is recomputed
+5. **Optional optimistic concurrency** — send `If-Match: "<etag>"` on block
+   and finalize requests; stale maps receive HTTP 412 without mutating the file.
 
 ## Installation
 
@@ -42,8 +44,12 @@ All endpoints require authentication (same credentials as WebDAV).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/blockmap/{path}` | Get block map (auto-computed, cached by ETag) |
-| `POST` | `/api/blocks/{path}?offset=N&size=M` | Write a single block at offset |
-| `POST` | `/api/finalize/{path}` | Finalize after block writes (touch mtime, recompute) |
+| `POST` | `/api/blocks/{path}?offset=N&size=M` | Write a single block at offset; optional `If-Match` |
+| `POST` | `/api/finalize/{path}` | Finalize after block writes (touch mtime, recompute); optional `If-Match` |
+
+When `If-Match` is supplied, the server compares it to the current file ETag
+before each mutation. A mismatch returns `412 Precondition Failed`; clients
+should discard the stale block map and retry from a newly fetched map.
 | `GET` | `/api/status` | Health check (public, no auth required) |
 
 ## Block Map Format

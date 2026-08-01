@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\CrispCloudDelta\Controller;
 
 use OCA\CrispCloudDelta\Service\BlockMapService;
+use OCA\CrispCloudDelta\Service\EtagMismatchException;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\JSONResponse;
@@ -83,7 +84,15 @@ class DeltaController extends Controller {
         }
 
         try {
-            $this->blockMapService->writeBlock($userId, '/' . $path, $offset, $data);
+            $this->blockMapService->writeBlock(
+                $userId,
+                '/' . $path,
+                $offset,
+                $data,
+                $this->request->getHeader('If-Match')
+            );
+        } catch (EtagMismatchException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_PRECONDITION_FAILED);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
@@ -107,7 +116,14 @@ class DeltaController extends Controller {
         $newSize = ($sizeParam !== null) ? (int)$sizeParam : -1;
 
         try {
-            $this->blockMapService->finalizeFile($userId, '/' . $path, $newSize);
+            $this->blockMapService->finalizeFile(
+                $userId,
+                '/' . $path,
+                $newSize,
+                $this->request->getHeader('If-Match')
+            );
+        } catch (EtagMismatchException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_PRECONDITION_FAILED);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }

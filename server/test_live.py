@@ -107,21 +107,27 @@ def delta_blockmap(base_url: str, user: str, password: str,
 
 
 def delta_put_block(base_url: str, user: str, password: str,
-                    remote_path: str, offset: int, data: bytes) -> int:
+                    remote_path: str, offset: int, data: bytes,
+                    if_match: str = None) -> int:
     qs = urllib.parse.urlencode({"offset": offset, "size": len(data)})
     url = (f"{base_url}/index.php/apps/crispcloud_delta/api/blocks"
            f"/{remote_path.lstrip('/')}?{qs}")
+    headers = {"If-Match": f'"{if_match}"'} if if_match else None
     code, _ = request("POST", url, user, password, body=data,
-                      content_type="application/octet-stream")
+                      content_type="application/octet-stream",
+                      extra_headers=headers)
     return code
 
 
 def delta_finalize(base_url: str, user: str, password: str,
-                   remote_path: str, new_size: int) -> int:
+                   remote_path: str, new_size: int,
+                   if_match: str = None) -> int:
     qs = urllib.parse.urlencode({"size": new_size})
     url = (f"{base_url}/index.php/apps/crispcloud_delta/api/finalize"
            f"/{remote_path.lstrip('/')}?{qs}")
-    code, _ = request("POST", url, user, password, body=b"")
+    headers = {"If-Match": f'"{if_match}"'} if if_match else None
+    code, _ = request("POST", url, user, password, body=b"",
+                      extra_headers=headers)
     return code
 
 
@@ -303,6 +309,37 @@ def test_file_grow(base_url, user, password):
         webdav_delete(base_url, user, password, remote_path)
 
 
+def test_stale_etag_rejected(base_url, user, password):
+    print("\n[6] Stale ETag mutation is rejected")
+    remote_path = "_delta_test_stale_etag.bin"
+    original = bytes(b'\\x11' * BLOCK_SIZE)
+    concurrent = bytes(b'\\x22' * BLOCK_SIZE)
+
+    try:
+        code = webdav_put(base_url, user, password, remote_path, original)
+        assert code in (200, 201, 204)
+        code, blockmap = delta_blockmap(base_url, user, password, remote_path)
+        assert code == 200 and blockmap.get("etag"), "missing initial ETag"
+        stale_etag = blockmap["etag"]
+
+        code = webdav_put(base_url, user, password, remote_path, concurrent)
+        assert code in (200, 201, 204)
+
+        code = delta_put_block(
+            base_url, user, password, remote_path, 0, original,
+            if_match=stale_etag)
+        assert code == 412, f"stale block write returned {code}, expected 412"
+        code = delta_finalize(
+            base_url, user, password, remote_path, len(original),
+            if_match=stale_etag)
+        assert code == 412, f"stale finalize returned {code}, expected 412"
+        ok("stale block and finalize requests return HTTP 412")
+    except Exception as e:
+        fail("stale ETag rejection", str(e))
+    finally:
+        webdav_delete(base_url, user, password, remote_path)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -323,6 +360,7 @@ if __name__ == "__main__":
     test_delta_update(base_url, user, password)
     test_file_shrink(base_url, user, password)
     test_file_grow(base_url, user, password)
+    test_stale_etag_rejected(base_url, user, password)
 
     passed = sum(1 for _, ok in results if ok)
     total = len(results)
