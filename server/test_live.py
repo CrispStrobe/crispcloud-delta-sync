@@ -235,7 +235,15 @@ def test_delta_update(base_url, user, password):
         assert code == 200, f"WebDAV GET returned {code}"
         assert len(server_content) == len(modified), \
             f"size mismatch: {len(server_content)} != {len(modified)}"
-        assert server_content == bytes(modified), "content mismatch after delta update"
+        if server_content != bytes(modified):
+            first = next((i for i, (actual, expected) in enumerate(
+                zip(server_content, modified)) if actual != expected), None)
+            raise AssertionError(
+                f"content mismatch after delta update at offset {first}: "
+                f"got={server_content[first] if first is not None else None} "
+                f"expected={modified[first] if first is not None else None} "
+                f"sha256={hashlib.sha256(server_content).hexdigest()}"
+            )
         ok("server file is bit-perfect after delta update")
 
     except Exception as e:
@@ -300,7 +308,15 @@ def test_file_grow(base_url, user, password):
         assert code == 200
         assert len(server_content) == len(grown), \
             f"server size {len(server_content)} != expected {len(grown)}"
-        assert server_content == grown, "content mismatch after grow"
+        if server_content != grown:
+            first = next((i for i, (actual, expected) in enumerate(
+                zip(server_content, grown)) if actual != expected), None)
+            raise AssertionError(
+                f"content mismatch after grow at offset {first}: "
+                f"got={server_content[first] if first is not None else None} "
+                f"expected={grown[first] if first is not None else None} "
+                f"sha256={hashlib.sha256(server_content).hexdigest()}"
+            )
         ok("server file correctly extended after grow")
 
     except Exception as e:

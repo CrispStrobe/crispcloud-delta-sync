@@ -179,7 +179,11 @@ class BlockMapService {
                 $stageFile = $stageFolder->get($name);
                 $stageFile->putContent($data);
             } catch (NotFoundException $e) {
-                $stageFolder->newFile($name, $data);
+                // ownCloud 10's IFolder::newFile accepts only the name;
+                // Nextcloud also supports the one-argument form. Write the
+                // payload explicitly so both APIs stage identical bytes.
+                $stageFile = $stageFolder->newFile($name);
+                $stageFile->putContent($data);
             }
             error_log("crispcloud_delta: staged block at offset $offset (" . strlen($data) . " bytes) for $path");
         });
