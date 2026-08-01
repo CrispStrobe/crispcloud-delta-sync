@@ -10,6 +10,7 @@ Tests:
   5. File grow — new block added at the end, verify server extends correctly
   6. Stale ETag — concurrent mutation is rejected without overwriting newer data
   7. Staged visibility — readers see the old file until finalize commits it
+  8. In-flight reader stress — concurrent GETs never observe a mixed file
 
 Usage:
   python3 test_live.py http://168.119.190.252:8888 admin Nextcloud2026!
@@ -25,6 +26,8 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import base64
+import threading
+import time
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MB, must match server
 
@@ -396,6 +399,74 @@ def test_staged_reader_visibility(base_url, user, password):
         webdav_delete(base_url, user, password, remote_path)
 
 
+def test_inflight_reader_stress(base_url, user, password):
+    print("\n[8] In-flight finalize reader stress")
+    remote_path = "_delta_test_inflight_readers.bin"
+    original = bytes([0x41]) * (2 * BLOCK_SIZE)
+    changed = bytes([0xD2]) * BLOCK_SIZE + bytes([0xE3]) * BLOCK_SIZE
+    stop = threading.Event()
+    observations = []
+    errors = []
+    observations_lock = threading.Lock()
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                code, body = webdav_get(base_url, user, password, remote_path)
+                with observations_lock:
+                    if code != 200:
+                        errors.append(f"HTTP {code}")
+                    elif body == original:
+                        observations.append("old")
+                    elif body == changed:
+                        observations.append("new")
+                    else:
+                        observations.append("mixed")
+            except Exception as error:
+                with observations_lock:
+                    errors.append(str(error))
+
+    try:
+        code = webdav_put(base_url, user, password, remote_path, original)
+        assert code in (200, 201, 204), f"initial PUT returned {code}"
+        code, blockmap = delta_blockmap(base_url, user, password, remote_path)
+        assert code == 200 and blockmap.get("etag"), "missing initial ETag"
+
+        for offset, block in ((0, changed[:BLOCK_SIZE]),
+                              (BLOCK_SIZE, changed[BLOCK_SIZE:])):
+            code = delta_put_block(
+                base_url, user, password, remote_path, offset, block,
+                if_match=blockmap["etag"])
+            assert code == 200, f"staged block at {offset} returned {code}"
+
+        threads = [threading.Thread(target=reader, daemon=True) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        # Let readers issue requests before starting the mutation, then keep
+        # them running through the complete finalize operation.
+        time.sleep(0.05)
+        code = delta_finalize(
+            base_url, user, password, remote_path, len(changed),
+            if_match=blockmap["etag"])
+        assert code == 200, f"finalize returned {code}"
+        time.sleep(0.05)
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        with observations_lock:
+            assert observations, "reader threads produced no observations"
+            assert not errors, f"reader errors: {errors[:3]}"
+            assert "mixed" not in observations, \
+                f"reader observed a mixed response: {observations[:10]}"
+        ok(f"{len(observations)} concurrent reads saw only complete old/new files")
+    except Exception as e:
+        stop.set()
+        fail("in-flight reader stress", str(e))
+    finally:
+        webdav_delete(base_url, user, password, remote_path)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -418,6 +489,7 @@ if __name__ == "__main__":
     test_file_grow(base_url, user, password)
     test_stale_etag_rejected(base_url, user, password)
     test_staged_reader_visibility(base_url, user, password)
+    test_inflight_reader_stress(base_url, user, password)
 
     passed = sum(1 for _, ok in results if ok)
     total = len(results)
