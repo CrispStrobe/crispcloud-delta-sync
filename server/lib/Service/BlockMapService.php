@@ -30,6 +30,8 @@ class BlockMapService {
     private const ADLER_MOD = 65521;
     private const CACHE_FOLDER = '.crispcloud_delta';
     private const STAGING_FOLDER = '.crispcloud_delta/staging';
+    private const FINALIZE_LOCK_RETRIES = 200;
+    private const FINALIZE_LOCK_RETRY_US = 100000;
 
     private IRootFolder $rootFolder;
     private IConfig $config;
@@ -198,37 +200,50 @@ class BlockMapService {
         int $newSize = -1,
         ?string $ifMatch = null
     ): void {
-        $this->withPathLock($userId, $path, function () use ($userId, $path, $newSize, $ifMatch): void {
-            $this->assertEtag($userId, $path, $ifMatch);
-            $userFolder = $this->rootFolder->getUserFolder($userId);
-            $file = $userFolder->get($path);
-            $content = $file->getContent();
-            foreach ($this->readStagedBlocks($userFolder, $this->stagePath($path)) as $offset => $data) {
-                $end = $offset + strlen($data);
-                if ($end > strlen($content)) {
-                    $content .= str_repeat("\0", $end - strlen($content));
-                }
-                $content = substr_replace($content, $data, $offset, strlen($data));
-            }
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                $this->withPathLock($userId, $path, function () use ($userId, $path, $newSize, $ifMatch): void {
+                    $this->assertEtag($userId, $path, $ifMatch);
+                    $userFolder = $this->rootFolder->getUserFolder($userId);
+                    $file = $userFolder->get($path);
+                    $content = $file->getContent();
+                    foreach ($this->readStagedBlocks($userFolder, $this->stagePath($path)) as $offset => $data) {
+                        $end = $offset + strlen($data);
+                        if ($end > strlen($content)) {
+                            $content .= str_repeat("\0", $end - strlen($content));
+                        }
+                        $content = substr_replace($content, $data, $offset, strlen($data));
+                    }
 
-            if ($newSize >= 0) {
-                if ($newSize < strlen($content)) {
-                    $content = substr($content, 0, $newSize);
-                } elseif ($newSize > strlen($content)) {
-                    $content .= str_repeat("\0", $newSize - strlen($content));
-                }
-            }
+                    if ($newSize >= 0) {
+                        if ($newSize < strlen($content)) {
+                            $content = substr($content, 0, $newSize);
+                        } elseif ($newSize > strlen($content)) {
+                            $content .= str_repeat("\0", $newSize - strlen($content));
+                        }
+                    }
 
-            // A single storage operation keeps readers on the old file until
-            // the complete patched content is ready.
-            $file->putContent($content);
-            $file->touch();
-            $blockMap = $this->computeBlockMap($file, $path);
-            $blockMap['etag'] = $file->getEtag();
-            $this->saveCachedBlockMap($userId, $path, $blockMap);
-            $this->clearStagedBlocks($userFolder, $this->stagePath($path));
-            error_log("crispcloud_delta: finalized delta sync for $path");
-        });
+                    // A single storage operation keeps readers on the old file until
+                    // the complete patched content is ready.
+                    $file->putContent($content);
+                    $file->touch();
+                    $blockMap = $this->computeBlockMap($file, $path);
+                    $blockMap['etag'] = $file->getEtag();
+                    $this->saveCachedBlockMap($userId, $path, $blockMap);
+                    $this->clearStagedBlocks($userFolder, $this->stagePath($path));
+                    error_log("crispcloud_delta: finalized delta sync for $path");
+                });
+                return;
+            } catch (EtagMismatchException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                $isLocked = stripos($e->getMessage(), 'locked') !== false;
+                if (!$isLocked || $attempt >= self::FINALIZE_LOCK_RETRIES) {
+                    throw $e;
+                }
+                usleep(self::FINALIZE_LOCK_RETRY_US);
+            }
+        }
     }
 
     /**

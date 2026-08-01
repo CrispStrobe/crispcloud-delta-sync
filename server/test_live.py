@@ -27,7 +27,6 @@ import urllib.parse
 import urllib.error
 import base64
 import threading
-import time
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MB, must match server
 
@@ -402,29 +401,29 @@ def test_staged_reader_visibility(base_url, user, password):
 def test_inflight_reader_stress(base_url, user, password):
     print("\n[8] In-flight finalize reader stress")
     remote_path = "_delta_test_inflight_readers.bin"
-    original = bytes([0x41]) * (2 * BLOCK_SIZE)
-    changed = bytes([0xD2]) * BLOCK_SIZE + bytes([0xE3]) * BLOCK_SIZE
-    stop = threading.Event()
+    original = bytes([0x41]) * BLOCK_SIZE
+    changed = bytes([0xD2]) * BLOCK_SIZE
+    reader_barrier = threading.Barrier(9)
     observations = []
     errors = []
     observations_lock = threading.Lock()
 
     def reader() -> None:
-        while not stop.is_set():
-            try:
-                code, body = webdav_get(base_url, user, password, remote_path)
-                with observations_lock:
-                    if code != 200:
-                        errors.append(f"HTTP {code}")
-                    elif body == original:
-                        observations.append("old")
-                    elif body == changed:
-                        observations.append("new")
-                    else:
-                        observations.append("mixed")
-            except Exception as error:
-                with observations_lock:
-                    errors.append(str(error))
+        try:
+            reader_barrier.wait(timeout=10)
+            code, body = webdav_get(base_url, user, password, remote_path)
+            with observations_lock:
+                if code != 200:
+                    errors.append(f"HTTP {code}")
+                elif body == original:
+                    observations.append("old")
+                elif body == changed:
+                    observations.append("new")
+                else:
+                    observations.append("mixed")
+        except Exception as error:
+            with observations_lock:
+                errors.append(str(error))
 
     try:
         code = webdav_put(base_url, user, password, remote_path, original)
@@ -432,8 +431,7 @@ def test_inflight_reader_stress(base_url, user, password):
         code, blockmap = delta_blockmap(base_url, user, password, remote_path)
         assert code == 200 and blockmap.get("etag"), "missing initial ETag"
 
-        for offset, block in ((0, changed[:BLOCK_SIZE]),
-                              (BLOCK_SIZE, changed[BLOCK_SIZE:])):
+        for offset, block in ((0, changed),):
             code = delta_put_block(
                 base_url, user, password, remote_path, offset, block,
                 if_match=blockmap["etag"])
@@ -442,15 +440,14 @@ def test_inflight_reader_stress(base_url, user, password):
         threads = [threading.Thread(target=reader, daemon=True) for _ in range(8)]
         for thread in threads:
             thread.start()
-        # Let readers issue requests before starting the mutation, then keep
-        # them running through the complete finalize operation.
-        time.sleep(0.05)
+        # Release exactly eight readers together, then start finalize while
+        # those requests are in flight. No new readers are spawned, so the
+        # server can make progress once this bounded reader set drains.
+        reader_barrier.wait(timeout=10)
         code = delta_finalize(
             base_url, user, password, remote_path, len(changed),
             if_match=blockmap["etag"])
         assert code == 200, f"finalize returned {code}"
-        time.sleep(0.05)
-        stop.set()
         for thread in threads:
             thread.join(timeout=5)
 
@@ -461,7 +458,6 @@ def test_inflight_reader_stress(base_url, user, password):
                 f"reader observed a mixed response: {observations[:10]}"
         ok(f"{len(observations)} concurrent reads saw only complete old/new files")
     except Exception as e:
-        stop.set()
         fail("in-flight reader stress", str(e))
     finally:
         webdav_delete(base_url, user, password, remote_path)

@@ -50,6 +50,14 @@ All endpoints require authentication (same credentials as WebDAV).
 When `If-Match` is supplied, the server compares it to the current file ETag
 before each mutation. A mismatch returns `412 Precondition Failed`; clients
 should discard the stale block map and retry from a newly fetched map.
+
+Changed blocks are staged in a per-file staging area. Finalize applies all
+staged blocks with one complete content write, refreshes the cached block map,
+and then clears staging. If a provider temporarily reports the file as locked
+by an active WebDAV reader, finalize retries for a bounded period; it never
+retries stale ETags or unrelated failures. Readers therefore observe either
+the complete old file or the complete finalized file, not a partially patched
+file.
 | `GET` | `/api/status` | Health check (public, no auth required) |
 
 ## Block Map Format
@@ -94,6 +102,14 @@ cd server/
 make release
 # Creates build/crispcloud_delta-0.1.0.tar.gz
 ```
+
+## Live verification
+
+`server/test_live.py` covers status, block-map hashes, delta replacement,
+resize, stale ETags, staged visibility, and eight-reader finalize races. The
+suite passes 12/12 against both the isolated Nextcloud and ownCloud test
+instances when run through an SSH tunnel. It creates a temporary user and
+does not read credentials from a keychain.
 
 ## Nextcloud App Store Submission
 

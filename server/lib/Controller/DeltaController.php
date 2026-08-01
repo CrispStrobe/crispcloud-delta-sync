@@ -94,6 +94,7 @@ class DeltaController extends Controller {
         } catch (EtagMismatchException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_PRECONDITION_FAILED);
         } catch (\Throwable $e) {
+            error_log('crispcloud_delta: block write failed: ' . $e->getMessage());
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
 
@@ -125,6 +126,7 @@ class DeltaController extends Controller {
         } catch (EtagMismatchException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_PRECONDITION_FAILED);
         } catch (\Throwable $e) {
+            error_log('crispcloud_delta: finalize failed: ' . $e->getMessage());
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
 
