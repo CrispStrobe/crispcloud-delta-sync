@@ -29,6 +29,7 @@ class BlockMapService {
     private const BLOCK_SIZE = 4 * 1024 * 1024; // 4 MB
     private const ADLER_MOD = 65521;
     private const CACHE_FOLDER = '.crispcloud_delta';
+    private const STAGING_FOLDER = '.crispcloud_delta/staging';
 
     private IRootFolder $rootFolder;
     private IConfig $config;
@@ -161,29 +162,27 @@ class BlockMapService {
         string $data,
         ?string $ifMatch = null
     ): void {
-        $this->assertEtag($userId, $path, $ifMatch);
-        $userFolder = $this->rootFolder->getUserFolder($userId);
-        $file = $userFolder->get($path);
-
-        if ($file->getType() !== \OCP\Files\FileInfo::TYPE_FILE) {
-            throw new \RuntimeException("Not a file: $path");
+        if ($offset < 0) {
+            throw new \InvalidArgumentException("Negative block offset: $offset");
         }
+        $this->withPathLock($userId, $path, function () use ($userId, $path, $offset, $data, $ifMatch): void {
+            $this->assertEtag($userId, $path, $ifMatch);
+            $userFolder = $this->rootFolder->getUserFolder($userId);
+            $file = $userFolder->get($path);
+            if ($file->getType() !== \OCP\Files\FileInfo::TYPE_FILE) {
+                throw new \RuntimeException("Not a file: $path");
+            }
 
-        // Read current content, patch the block, write back
-        $handle = $file->fopen('cb+'); // open for read/write, create if needed
-        if ($handle === false) {
-            throw new \RuntimeException("Cannot open file for writing: $path");
-        }
-
-        try {
-            fseek($handle, $offset, SEEK_SET);
-            fwrite($handle, $data);
-            fflush($handle);
-        } finally {
-            fclose($handle);
-        }
-
-        error_log("crispcloud_delta: wrote block at offset $offset (" . strlen($data) . " bytes) to $path");
+            $stageFolder = $this->getOrCreateFolder($userFolder, $this->stagePath($path));
+            $name = (string)$offset;
+            try {
+                $stageFile = $stageFolder->get($name);
+                $stageFile->putContent($data);
+            } catch (NotFoundException $e) {
+                $stageFolder->newFile($name, $data);
+            }
+            error_log("crispcloud_delta: staged block at offset $offset (" . strlen($data) . " bytes) for $path");
+        });
     }
 
     /**
@@ -195,29 +194,37 @@ class BlockMapService {
         int $newSize = -1,
         ?string $ifMatch = null
     ): void {
-        $this->assertEtag($userId, $path, $ifMatch);
-        $userFolder = $this->rootFolder->getUserFolder($userId);
-        $file = $userFolder->get($path);
-
-        // Truncate if the new size is smaller than the current file size.
-        // Without this, a shrinking file would leave stale data at the tail.
-        if ($newSize >= 0 && $newSize < $file->getSize()) {
-            $handle = $file->fopen('cb+');
-            if ($handle !== false) {
-                ftruncate($handle, $newSize);
-                fclose($handle);
+        $this->withPathLock($userId, $path, function () use ($userId, $path, $newSize, $ifMatch): void {
+            $this->assertEtag($userId, $path, $ifMatch);
+            $userFolder = $this->rootFolder->getUserFolder($userId);
+            $file = $userFolder->get($path);
+            $content = $file->getContent();
+            foreach ($this->readStagedBlocks($userFolder, $this->stagePath($path)) as $offset => $data) {
+                $end = $offset + strlen($data);
+                if ($end > strlen($content)) {
+                    $content .= str_repeat("\0", $end - strlen($content));
+                }
+                $content = substr_replace($content, $data, $offset, strlen($data));
             }
-        }
 
-        // Touch triggers Nextcloud to update ETag and mtime
-        $file->touch();
+            if ($newSize >= 0) {
+                if ($newSize < strlen($content)) {
+                    $content = substr($content, 0, $newSize);
+                } elseif ($newSize > strlen($content)) {
+                    $content .= str_repeat("\0", $newSize - strlen($content));
+                }
+            }
 
-        // Recompute and cache the block map with the new ETag
-        $blockMap = $this->computeBlockMap($file, $path);
-        $blockMap['etag'] = $file->getEtag();
-        $this->saveCachedBlockMap($userId, $path, $blockMap);
-
-        error_log("crispcloud_delta: finalized delta sync for $path");
+            // A single storage operation keeps readers on the old file until
+            // the complete patched content is ready.
+            $file->putContent($content);
+            $file->touch();
+            $blockMap = $this->computeBlockMap($file, $path);
+            $blockMap['etag'] = $file->getEtag();
+            $this->saveCachedBlockMap($userId, $path, $blockMap);
+            $this->clearStagedBlocks($userFolder, $this->stagePath($path));
+            error_log("crispcloud_delta: finalized delta sync for $path");
+        });
     }
 
     /**
@@ -249,6 +256,72 @@ class BlockMapService {
         }
 
         throw new EtagMismatchException($path, $ifMatch, $actual);
+    }
+
+    private function stagePath(string $path): string {
+        return self::STAGING_FOLDER . '/' . hash('sha256', $path);
+    }
+
+    /** @return array<int, string> */
+    private function readStagedBlocks($userFolder, string $stagePath): array {
+        try {
+            $folder = $userFolder->get($stagePath);
+        } catch (NotFoundException $e) {
+            return [];
+        }
+        $blocks = [];
+        foreach ($folder->getDirectoryListing() as $node) {
+            if ($node->getType() !== \OCP\Files\FileInfo::TYPE_FILE) {
+                continue;
+            }
+            $offset = filter_var($node->getName(), FILTER_VALIDATE_INT);
+            if ($offset === false || $offset < 0) {
+                continue;
+            }
+            $blocks[(int)$offset] = $node->getContent();
+        }
+        ksort($blocks, SORT_NUMERIC);
+        return $blocks;
+    }
+
+    private function clearStagedBlocks($userFolder, string $stagePath): void {
+        try {
+            $userFolder->get($stagePath)->delete();
+        } catch (NotFoundException $e) {
+            // Nothing staged is a valid no-op finalize.
+        }
+    }
+
+    private function getOrCreateFolder($userFolder, string $path) {
+        $current = $userFolder;
+        foreach (explode('/', trim($path, '/')) as $part) {
+            if ($part === '') {
+                continue;
+            }
+            try {
+                $current = $current->get($part);
+            } catch (NotFoundException $e) {
+                $current = $current->newFolder($part);
+            }
+        }
+        return $current;
+    }
+
+    private function withPathLock(string $userId, string $path, callable $operation): void {
+        $lockPath = sys_get_temp_dir() . '/crispcloud_delta_' . hash('sha256', $userId . ':' . $path) . '.lock';
+        $lock = fopen($lockPath, 'c');
+        if ($lock === false) {
+            throw new \RuntimeException("Cannot open delta lock for $path");
+        }
+        try {
+            if (!flock($lock, LOCK_EX)) {
+                throw new \RuntimeException("Cannot lock delta path: $path");
+            }
+            $operation();
+            flock($lock, LOCK_UN);
+        } finally {
+            fclose($lock);
+        }
     }
 
     // -------------------------------------------------------------------------
