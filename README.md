@@ -159,3 +159,7 @@ The block map format is compatible with rsync-style delta transfer:
 ## License
 
 AGPL-3.0 — same as Nextcloud and CrispCloud.
+
+## Trademarks and affiliation
+
+This project is independent and is not affiliated with, endorsed by or sponsored by Filen.io, Internxt, Nextcloud, ownCloud, oCIS, Plex, Google, Microsoft, Dropbox, pCloud, Amazon, Backblaze, Hetzner, or any other storage provider. All provider names, logos and trademarks are the property of their respective owners and are used only to identify compatible services.
