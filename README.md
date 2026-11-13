@@ -158,8 +158,14 @@ The block map format is compatible with rsync-style delta transfer:
 
 ## License
 
-AGPL-3.0 — same as Nextcloud and CrispCloud.
+AGPL-3.0; see [LICENSE](LICENSE) for the complete terms and additional permission.
 
 ## Trademarks and affiliation
 
 This project is independent and is not affiliated with, endorsed by or sponsored by Filen.io, Internxt, Nextcloud, ownCloud, oCIS, Plex, Google, Microsoft, Dropbox, pCloud, Amazon, Backblaze, Hetzner, or any other storage provider. All provider names, logos and trademarks are the property of their respective owners and are used only to identify compatible services.
+
+The PHP app is currently verified on **Nextcloud 33.0.11 / PHP 8.3.36** with
+12 live checks, including concurrent-reader visibility. The
+[server deployment notes](server/README.md#live-verification-and-deployment)
+cover private temporary storage, confined PHP-FPM pools, browser CORS, and the
+remaining memory and multi-host boundaries.

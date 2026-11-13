@@ -39,7 +39,8 @@ curl -u admin:password http://localhost/index.php/apps/crispcloud_delta/api/stat
 
 ## API Endpoints
 
-All endpoints require authentication (same credentials as WebDAV).
+File and mutation endpoints require authentication (the same credentials as WebDAV).
+The `/api/status` health endpoint is public.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -103,13 +104,36 @@ make release
 # Creates build/crispcloud_delta-0.1.0.tar.gz
 ```
 
-## Live verification
+## Live verification and deployment
 
-`server/test_live.py` covers status, block-map hashes, delta replacement,
-resize, stale ETags, staged visibility, and eight-reader finalize races. The
-suite passes 12/12 against both the isolated Nextcloud and ownCloud test
-instances when run through an SSH tunnel. It creates a temporary user and
-does not read credentials from a keychain.
+The current server app passed **12/12 live checks on Nextcloud 33.0.11 / PHP
+8.3.36**: block-map hashes, replacement, shrink/grow, stale-ETag rejection,
+staged visibility and an eight-reader finalize race. The test runs used
+isolated accounts on the prepared instance through a loopback SSH tunnel.
+The ownCloud implementation retains its earlier acceptance; it was not rerun
+as part of this Nextcloud maintenance refresh.
+
+On a confined PHP-FPM deployment, configure Nextcloud's `tempdirectory` and
+the PHP pool's `sys_temp_dir` to the same private directory outside the web
+root, writable only by the PHP service account (directory mode `0700`). The
+server app's local lock files use PHP's temp directory. A dedicated Nextcloud
+pool can also set `upload_tmp_dir` there. Keep that directory within the
+storage paths permitted by the existing confinement profile. For the 16 MiB
+POST controls in the live suite, `post_max_size` must exceed 16 MiB; the
+prepared test pool used 32 MiB. These are per-site settings.
+
+Browsers additionally require exact-origin CORS and an unauthenticated,
+empty preflight response on the intended DAV routes. Actual file requests
+still require normal authentication. See the
+[tested CrispCloud setup guide](https://github.com/CrispStrobe/CrispCloud/blob/main/docs/PROVIDER_SETUP.md#browser-access-webpwa).
+The DAV recipe does not automatically enable the OCS or custom delta API
+routes; those need their own scoped configuration.
+
+Current limits remain explicit: PHP finalize materializes the file in memory,
+so its working set must fit the site's PHP memory budget. The local finalize
+lock coordinates processes on one host; multi-host publication and streamed
+finalization need separate acceptance. These checks do not certify every
+storage backend or PHP deployment.
 
 ## Nextcloud App Store Submission
 
